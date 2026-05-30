@@ -30,28 +30,40 @@ To use a different model, set `ANTHROPIC_MODEL_ID`:
 export ANTHROPIC_MODEL_ID=claude-3-5-haiku-20241022
 ```
 
-## Run tests
+## Run unit tests
 
 ```bash
 pytest
 ```
 
-Tests are written against the pure Python helper `_count_char` so **no API key is needed** to run them. The tool-name test (`test_tool_name`) additionally verifies that the `@tool` decorator registered the function correctly with Strands.
+Tests run against the pure Python helper `_count_char` — **no API key needed**.
 
-## Testing strategy
+## Run evals
 
-| Layer | What's tested | Needs API key? |
-|-------|--------------|----------------|
-| Unit (`_count_char`) | Core logic — counts, edge cases, case sensitivity | No |
-| Tool (`count_char.tool_name`) | Strands decorator wired up correctly | No |
-| Integration (not included) | Full agent ↔ LLM loop | Yes — mock or real |
+Evals measure the agent’s end-to-end accuracy and performance using [`strands-agents-evals`](https://pypi.org/project/strands-agents-evals/).
 
-For integration tests, mock the model:
-
-```python
-from unittest.mock import MagicMock, patch
-
-def test_agent_calls_tool():
-    with patch("agent.model") as mock_model:
-        mock_model.return_value = ...  # craft a tool-use response
+```bash
+python evals/run_evals.py
 ```
+
+This runs 8 test cases through the live agent and reports:
+
+| Evaluator | Type | What it checks |
+|-----------|------|----------------|
+| `Contains` | Deterministic | Correct integer appears in response |
+| `ToolCalled` | Deterministic | `count_char` tool was invoked |
+| `OutputEvaluator` | LLM judge | Response is clear and accurate |
+
+At the end a performance summary shows min / avg / p95 latency across all cases.
+
+## Eval architecture
+
+```
+Eval cases (eval_cases.py)
+    └── Experiment.run_evaluations()
+          ├── _TimedTracedHandler  ← records latency + OTel spans per case
+          ├── fresh Agent per case ← no conversation history leakage
+          └── 3 evaluators run on each result
+```
+
+`TracedHandler` collects OpenTelemetry spans from each agent call, which is what enables `ToolCalled` to inspect whether the tool was invoked. A fresh `Agent` instance is returned from the task function for each case so that conversation history never leaks between cases.

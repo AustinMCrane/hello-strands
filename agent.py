@@ -18,11 +18,17 @@ model = AnthropicModel(
     max_tokens=1024,
 )
 
-agent = Agent(
-    system_prompt="You are a helpful assistant. Use the count_char tool when asked about character occurrences in strings.",
-    model=model,
-    tools=[count_char],
-)
+
+def create_agent() -> Agent:
+    """Return a fresh Agent with no conversation history."""
+    return Agent(
+        system_prompt="You are a helpful assistant. Use the count_char tool when asked about character occurrences in strings.",
+        model=model,
+        tools=[count_char],
+    )
+
+
+agent = create_agent()
 
 if __name__ == "__main__":
     result = agent("How many times does the letter 'l' appear in 'hello world'?")
