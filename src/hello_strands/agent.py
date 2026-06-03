@@ -4,7 +4,7 @@ from strands import Agent
 from strands.models.openai import OpenAIModel
 
 
-def create_agent() -> Agent:
+def create_agent(system_prompt: str | None = None) -> Agent:
     """Create a Strands agent backed by an OpenAI-compatible endpoint."""
     base_url = os.environ["OPENAI_BASE_URL"]
     api_key = os.environ.get("OPENAI_API_KEY", "placeholder")
@@ -18,4 +18,4 @@ def create_agent() -> Agent:
         model_id=model_id,
     )
 
-    return Agent(model=model)
+    return Agent(model=model, system_prompt=system_prompt or None)
