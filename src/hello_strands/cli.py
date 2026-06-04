@@ -12,7 +12,8 @@ def main() -> None:
 
     if len(sys.argv) > 1:
         prompt = " ".join(sys.argv[1:])
-        print(agent(prompt))
+        agent(prompt)
+        print("\n")
     else:
         print("hello-strands interactive mode. Type 'exit' to quit.\n")
         while True:
@@ -24,7 +25,8 @@ def main() -> None:
                 break
             if not prompt:
                 continue
-            print(f"Agent: {agent(prompt)}\n")
+            agent(prompt)
+            print("\n")
 
 
 if __name__ == "__main__":
