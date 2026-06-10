@@ -1,10 +1,12 @@
 import asyncio
+import os
 import time
 import uuid
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from strands.handlers.callback_handler import null_callback_handler
 
 from hello_strands.agent import create_agent
 from hello_strands.api.schemas import (
@@ -20,34 +22,51 @@ from hello_strands.api.schemas import (
 
 router = APIRouter()
 
+_MODEL_ID = os.environ.get("MODEL_ID", "gpt-5.4-mini")
+
+
+def _extract_text(content: str | list) -> str:
+    if isinstance(content, str):
+        return content
+    parts = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "text":
+            parts.append(part.get("text", ""))
+        elif isinstance(part, str):
+            parts.append(part)
+    return "".join(parts)
+
 
 def _build_strands_messages(request: ChatCompletionRequest) -> tuple[list, str | None]:
-    """Split OpenAI messages into a Strands-compatible message list and system prompt."""
     system_prompt = None
     strands_messages = []
 
     for msg in request.messages:
         if msg.role == "system":
-            system_prompt = msg.content
+            system_prompt = _extract_text(msg.content)
         else:
             strands_messages.append(
-                {"role": msg.role, "content": [{"text": msg.content}]}
+                {"role": msg.role, "content": [{"text": _extract_text(msg.content)}]}
             )
 
     return strands_messages, system_prompt
 
 
 async def _stream_chunks(
-    request: ChatCompletionRequest,
+    request: ChatCompletionRequest, http_request: Request
 ) -> AsyncGenerator[str, None]:
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     model = request.model
+    include_usage = request.stream_options and request.stream_options.include_usage
 
     messages, system_prompt = _build_strands_messages(request)
-    agent = create_agent(system_prompt=system_prompt)
+    agent = create_agent(
+        model=http_request.app.state.model,
+        system_prompt=system_prompt,
+        callback_handler=null_callback_handler,
+    )
 
-    # First chunk announces the assistant role
     first = ChatCompletionChunk(
         id=completion_id,
         created=created,
@@ -56,7 +75,6 @@ async def _stream_chunks(
     )
     yield f"data: {first.model_dump_json()}\n\n"
 
-    # Pass the full conversation; stream_async accepts list[Message]
     prompt: list | str = messages if messages else ""
     async for event in agent.stream_async(prompt):
         text: str = event.get("data", "")
@@ -69,24 +87,24 @@ async def _stream_chunks(
             choices=[ChunkChoice(delta=Delta(content=text))],
         )
         yield f"data: {chunk.model_dump_json()}\n\n"
-        await asyncio.sleep(0)  # yield control so the event loop can flush
+        await asyncio.sleep(0)
 
-    # Final chunk signals end of stream
     final = ChatCompletionChunk(
         id=completion_id,
         created=created,
         model=model,
         choices=[ChunkChoice(delta=Delta(), finish_reason="stop")],
+        usage=Usage() if include_usage else None,
     )
     yield f"data: {final.model_dump_json()}\n\n"
     yield "data: [DONE]\n\n"
 
 
 @router.post("/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest, http_request: Request):
     if request.stream:
         return StreamingResponse(
-            _stream_chunks(request),
+            _stream_chunks(request, http_request),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -95,11 +113,14 @@ async def chat_completions(request: ChatCompletionRequest):
             },
         )
 
-    # Non-streaming: run the agent and collect the full response
     messages, system_prompt = _build_strands_messages(request)
-    agent = create_agent(system_prompt=system_prompt)
+    agent = create_agent(
+        model=http_request.app.state.model,
+        system_prompt=system_prompt,
+        callback_handler=null_callback_handler,
+    )
     prompt: list | str = messages if messages else ""
-    result = agent(prompt)
+    result = await asyncio.to_thread(agent, prompt)
 
     return ChatCompletionResponse(
         id=f"chatcmpl-{uuid.uuid4().hex[:24]}",
@@ -110,20 +131,22 @@ async def chat_completions(request: ChatCompletionRequest):
     )
 
 
+def _model_object(model_id: str) -> dict:
+    return {
+        "id": model_id,
+        "object": "model",
+        "created": 0,
+        "owned_by": "hello-strands",
+    }
+
+
 @router.get("/models")
 async def list_models():
-    """Minimal /v1/models endpoint so OpenAI-compatible clients don't error."""
-    import os
+    return {"object": "list", "data": [_model_object(_MODEL_ID)]}
 
-    model_id = os.environ.get("MODEL_ID", "gpt-4o")
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": model_id,
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "hello-strands",
-            }
-        ],
-    }
+
+@router.get("/models/{model_id}")
+async def get_model(model_id: str):
+    if model_id != _MODEL_ID:
+        raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
+    return _model_object(_MODEL_ID)

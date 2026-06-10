@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "hello-strands": {
+      "name": "hello-strands",
+      "api": "openai",
+      "models": {
+        "gpt-4o-mini": {
+          "name": "gpt-5.4-mini",
+          "attachment": false
+        }
+      },
+      "options": {
+        "baseURL": "http://localhost:8000/v1",
+        "apiKey": "${OPENAI_API_KEY}"
+      }
+    }
+  }
+}

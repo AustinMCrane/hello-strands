@@ -5,16 +5,26 @@ from pydantic import BaseModel
 
 class Message(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str
+    content: str | list
+
+
+class StreamOptions(BaseModel):
+    include_usage: bool = False
 
 
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[Message]
     stream: bool = False
+    stream_options: StreamOptions | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     top_p: float | None = None
+    n: int | None = None
+    stop: str | list[str] | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    user: str | None = None
 
 
 # --- Non-streaming response ---
@@ -45,6 +55,7 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: list[Choice]
     usage: Usage
+    system_fingerprint: str | None = None
 
 
 # --- Streaming response (SSE chunks) ---
@@ -68,3 +79,5 @@ class ChatCompletionChunk(BaseModel):
     created: int
     model: str
     choices: list[ChunkChoice]
+    system_fingerprint: str | None = None
+    usage: Usage | None = None
